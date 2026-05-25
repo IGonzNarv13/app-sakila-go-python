@@ -1,0 +1,23 @@
+# Variables de entorno
+.env
+
+# Archivos de Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Go
+*.exe
+*.test
+*.out
+
+# Sistema operativo / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
