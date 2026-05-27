@@ -8,6 +8,7 @@ from views.films_view import FilmsView
 from views.actors_view import ActorsView
 from views.categories_view import CategoriesView
 from views.actors_admin_view import ActorsAdminView
+from views.communication_view import CommunicationView
 
 
 class SakilaDesktopApp(ctk.CTk):
@@ -211,23 +212,18 @@ class SakilaDesktopApp(ctk.CTk):
         self.clear_content()
         ActorsAdminView(self.content_frame)
 
+    def show_actors_admin_view(self):
+        self.clear_content()
+        ActorsAdminView(self.content_frame)
+
     def show_categories_view(self):
         self.clear_content()
         CategoriesView(self.content_frame)
 
-    def show_actors_admin_view(self):
-        self.clear_content()
-        self.show_placeholder(
-            "Admin Actores",
-            "Aquí construiremos el CRUD completo de actores."
-        )
 
     def show_communication_view(self):
         self.clear_content()
-        self.show_placeholder(
-            "Comunicación",
-            "Aquí construiremos la lista de usuarios conectados, chat grupal y chat privado."
-        )
+        CommunicationView(self.content_frame, self.username)
 
     # ==========================
     # PLACEHOLDER TEMPORAL

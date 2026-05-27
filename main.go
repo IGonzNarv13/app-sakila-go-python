@@ -21,6 +21,14 @@ var connectedUsers = make(map[string]User)
 var messages []Message
 var mutex sync.Mutex
 
+type Event struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
+var eventClients = make(map[chan Event]bool)
+var eventMutex sync.Mutex
+
 // =======================
 // MODELOS
 // =======================
@@ -650,22 +658,32 @@ func connectUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mutex.Lock()
+	now := time.Now().Format("2006-01-02 15:04:05")
 
-	connectedUsers[request.Username] = User{
-		Username:    request.Username,
-		ConnectedAt: time.Now().Format("2006-01-02 15:04:05"),
-	}
-
-	messages = append(messages, Message{
+	systemMessage := Message{
 		From:   "Sistema",
 		To:     "general",
 		Text:   request.Username + " se ha conectado al servidor",
 		Type:   "system",
-		SentAt: time.Now().Format("2006-01-02 15:04:05"),
-	})
+		SentAt: now,
+	}
+
+	mutex.Lock()
+
+	connectedUsers[request.Username] = User{
+		Username:    request.Username,
+		ConnectedAt: now,
+	}
+
+	messages = append(messages, systemMessage)
 
 	mutex.Unlock()
+
+	broadcastEvent("user_connected", map[string]string{
+		"username": request.Username,
+	})
+
+	broadcastEvent("message_received", systemMessage)
 
 	response := map[string]string{
 		"message":  "Usuario conectado correctamente",
@@ -673,7 +691,7 @@ func connectUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, http.StatusOK, response)
-	}
+}
 
 func getUsersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
@@ -724,20 +742,37 @@ func disconnectUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mutex.Lock()
+	now := time.Now().Format("2006-01-02 15:04:05")
 
-	delete(connectedUsers, request.Username)
-
-	messages = append(messages, Message{
+	systemMessage := Message{
 		From:   "Sistema",
 		To:     "general",
 		Text:   request.Username + " se ha desconectado del servidor",
 		Type:   "system",
-		SentAt: time.Now().Format("2006-01-02 15:04:05"),
-	})
+		SentAt: now,
+	}
+
+	mutex.Lock()
+
+	delete(connectedUsers, request.Username)
+	messages = append(messages, systemMessage)
 
 	mutex.Unlock()
+
+	broadcastEvent("user_disconnected", map[string]string{
+		"username": request.Username,
+	})
+
+	broadcastEvent("message_received", systemMessage)
+
+	response := map[string]string{
+		"message":  "Usuario desconectado correctamente",
+		"username": request.Username,
+	}
+
+	sendJSON(w, http.StatusOK, response)
 }
+
 func createMessageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		enableCORS(w)
@@ -796,6 +831,8 @@ func createMessageHandler(w http.ResponseWriter, r *http.Request) {
 	mutex.Lock()
 	messages = append(messages, newMessage)
 	mutex.Unlock()
+
+	broadcastEvent("message_received", newMessage)
 
 	response := map[string]interface{}{
 		"message": "Mensaje enviado correctamente",
@@ -858,7 +895,83 @@ func getMessagesHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, filteredMessages)
 }
 
+func broadcastEvent(eventType string, data interface{}) {
+	event := Event{
+		Type: eventType,
+		Data: data,
+	}
 
+	eventMutex.Lock()
+	defer eventMutex.Unlock()
+
+	for client := range eventClients {
+		select {
+		case client <- event:
+		default:
+			// Si el cliente no puede recibir, evitamos bloquear el servidor.
+		}
+	}
+}
+
+func eventsHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		sendError(w, http.StatusMethodNotAllowed, "Método no permitido")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		sendError(w, http.StatusInternalServerError, "El servidor no soporta streaming")
+		return
+	}
+
+	clientChan := make(chan Event, 10)
+
+	eventMutex.Lock()
+	eventClients[clientChan] = true
+	eventMutex.Unlock()
+
+	defer func() {
+		eventMutex.Lock()
+		delete(eventClients, clientChan)
+		eventMutex.Unlock()
+		close(clientChan)
+	}()
+
+	fmt.Fprintf(w, "event: connected\n")
+	fmt.Fprintf(w, "data: {\"message\":\"Conexión de eventos establecida\"}\n\n")
+	flusher.Flush()
+
+	notify := r.Context().Done()
+
+	for {
+		select {
+		case <-notify:
+			return
+
+		case event := <-clientChan:
+			data, err := json.Marshal(event.Data)
+			if err != nil {
+				continue
+			}
+
+			fmt.Fprintf(w, "event: %s\n", event.Type)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
+}
 
 func main() {
 	var err error
@@ -922,6 +1035,7 @@ func main() {
 
 		sendError(w, http.StatusMethodNotAllowed, "Método no permitido")
 	})
+	http.HandleFunc("/api/events", eventsHandler)
 
 	fmt.Println("Servidor corriendo en http://localhost:" + apiPort)
 
