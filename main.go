@@ -142,7 +142,7 @@ func getFilmsHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT film_id, title, description, release_year, rating, length
 		FROM film
 		ORDER BY film_id
-		LIMIT 30
+		LIMIT 200
 	`)
 	if err != nil {
 		log.Println("Error al consultar películas:", err)
